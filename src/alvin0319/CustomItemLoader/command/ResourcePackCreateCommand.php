@@ -27,7 +27,6 @@ use pocketmine\utils\Filesystem;
 use pocketmine\uuid\UUID;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
-
 use SplFileInfo;
 use ZipArchive;
 
