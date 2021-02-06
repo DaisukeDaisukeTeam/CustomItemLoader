@@ -26,12 +26,8 @@ use pocketmine\event\Listener;
 use pocketmine\event\player\PlayerJoinEvent;
 use pocketmine\event\server\DataPacketSendEvent;
 use pocketmine\item\ItemFactory;
-use pocketmine\nbt\tag\ByteTag;
+use pocketmine\item\ItemIdentifier;
 use pocketmine\nbt\tag\CompoundTag;
-use pocketmine\nbt\tag\FloatTag;
-use pocketmine\nbt\tag\IntTag;
-use pocketmine\nbt\tag\ShortTag;
-use pocketmine\nbt\tag\StringTag;
 use pocketmine\network\mcpe\convert\ItemTranslator;
 use pocketmine\network\mcpe\convert\ItemTypeDictionary;
 use pocketmine\network\mcpe\protocol\ItemComponentPacket;
@@ -43,8 +39,6 @@ use pocketmine\plugin\PluginBase;
 use pocketmine\utils\AssumptionFailedError;
 use pocketmine\utils\SingletonTrait;
 use ReflectionClass;
-use Throwable;
-
 use function is_dir;
 use function is_numeric;
 use function mkdir;
@@ -116,6 +110,8 @@ class CustomItemLoader extends PluginBase implements Listener{
 	public function parseTag(string $name, array $data) : CompoundTag{
 		$this->validateData($data);
 
+		$itemFactory = ItemFactory::getInstance();
+
 		$id = (int) $data["id"];
 		$meta = (int) $data["meta"];
 
@@ -134,53 +130,72 @@ class CustomItemLoader extends PluginBase implements Listener{
 		$can_always_eat = (int) ($data["can_always_eat"] ?? false);
 		$nutrition = (int) ($data["nutrition"] ?? 1);
 		$saturation = (float) ($data["saturation"] ?? 1);
-		$residue = isset($data["residue"]) ? ItemFactory::get((int) $data["residue"]["id"], (int) ($data["residue"]["meta"] ?? 0)) : ItemFactory::get(0);
+		$residue = isset($data["residue"]) ? $itemFactory->get((int) $data["residue"]["id"], (int) ($data["residue"]["meta"] ?? 0)) : $itemFactory->get(0);
 
-		$nbt = new CompoundTag("", [
-			new CompoundTag("components", [
-				new CompoundTag("minecraft:icon", [
-					new StringTag("texture", $data["texture"])
-				]),
-				new CompoundTag("item_properties", [
-					new IntTag("use_duration", 32),
-					new IntTag("use_animation", ($food === 1 ? 1 : 0)), // 2 is potion, but not now
-					new ByteTag("allow_off_hand", $allow_off_hand),
-					new ByteTag("can_destroy_in_creative", $can_destroy_in_creative),
-					new ByteTag("creative_category", $creative_category),
-					new ByteTag("hand_equipped", $hand_equipped),
-					new IntTag("max_stack_size", $max_stack_size),
-					new FloatTag("mining_speed", $mining_speed),
-					new ByteTag("animates_in_toolbar", 1),
-				])
-			]),
-			new ShortTag("minecraft:identifier", $runtimeId),
-			new CompoundTag("minecraft:display_name", [
-				new StringTag("value", $data["name"])
-			]),
-			new CompoundTag("minecraft:on_use", [
-				new ByteTag("on_use", 1)
-			]),
-			new CompoundTag("minecraft:on_use_on", [
-				new ByteTag("on_use_on", 1)
-			])
-		]);
+
+		$nbt = new CompoundTag();
+		{
+			{
+				$components = new CompoundTag();
+				{
+					$icon = new CompoundTag();
+					$icon->setString("texture", $data["texture"]);
+					$components->setTag("minecraft:icon", $icon);
+				}
+				{
+					$properties = new CompoundTag();
+					$properties->setInt("use_duration", 32);
+					$properties->setInt("use_animation", ($food === 1 ? 1 : 0));
+					$properties->setByte("allow_off_hand", $allow_off_hand);
+					$properties->setByte("can_destroy_in_creative", $can_destroy_in_creative);
+					$properties->setByte("creative_category", $creative_category);
+					$properties->setByte("hand_equipped", $hand_equipped);
+					$properties->setInt("max_stack_size", $max_stack_size);
+					$properties->setFloat("mining_speed", $mining_speed);
+					$properties->setByte("animates_in_toolbar", 1);
+
+					$components->setTag("item_properties", $properties);
+				}
+				$nbt->setTag("components", $components);
+			}
+			$nbt->setShort("minecraft:identifier", $runtimeId);
+			{
+				$display = new CompoundTag();
+				$display->setString("value", $data["name"]);
+				$nbt->setTag("minecraft:display_name", $display);
+			}
+			{
+				$on_use = new CompoundTag();
+				$on_use->setByte("on_use", 1);
+				$nbt->setTag("minecraft:on_use", $on_use);
+			}
+			{
+				$on_use_on = new CompoundTag();
+				$on_use->setByte("on_use_on", 1);
+				$nbt->setTag("minecraft:on_use_on", $on_use_on);
+			}
+		}
+
 		$durable = false;
 		if(isset($data["durable"]) && (bool) ($data["durable"]) !== false){
-			$nbt->getCompoundTag("components")->setTag(new CompoundTag("minecraft:durability", [
-				new ShortTag("damage_change", 1),
-				new ShortTag("max_durable", $data["max_durability"])
-			]));
+			$durableTag = new CompoundTag();
+			$durableTag->setShort("damage_change", 1);
+			$durableTag->setShort("max_durable", $data["max_durabilisty"]);
+
+			$nbt->getCompoundTag("components")->setTag("minecraft:durability", $durableTag);
 			$durable = true;
 		}
 		if($food === 1){
-			$nbt->getCompoundTag("components")->setTag(new CompoundTag("minecraft:food", [
-				new ByteTag("can_always_eat", $can_always_eat),
-				new FloatTag("nutrition", $nutrition),
-				new StringTag("saturation_modifier", "low")
-			]));
-			$nbt->getCompoundTag("components")->setTag(new CompoundTag("minecraft:use_duration", [
-				new IntTag("value", 1)
-			]));
+			$foodTag = new CompoundTag();
+			$foodTag->setByte("can_always_eat", $can_always_eat);
+			$foodTag->setFloat("nutrition", $nutrition);
+			$foodTag->setString("saturation_modifier", "low");
+
+			$use_duration = new CompoundTag();
+			$use_duration->setInt("value", 1);
+
+			$nbt->getCompoundTag("components")->setTag("minecraft:food", $foodTag);
+			$nbt->getCompoundTag("components")->setTag("minecraft:use_duration", $use_duration);
 		}
 		$runtimeId = $id + ($id > 0 ? 5000 : -5000);
 		$this->coreToNetValues[$id] = $runtimeId;
@@ -190,11 +205,11 @@ class CustomItemLoader extends PluginBase implements Listener{
 
 		try{
 			if($durable){
-				ItemFactory::registerItem(new CustomDurableItem($id, $meta, $name, $data["max_stack_size"], $data["max_durability"], $mining_speed));
+				$itemFactory->register(new CustomDurableItem(new ItemIdentifier($id, $meta), $name, $data["max_stack_size"], $data["max_durability"], $mining_speed));
 			}elseif($food){
-				ItemFactory::registerItem(new CustomFoodItem($id, $meta, $name, $data["max_stack_size"], $nutrition, $can_always_eat === 1, $saturation, $residue));
+				$itemFactory->register(new CustomFoodItem(new ItemIdentifier($id, $meta), $name, $data["max_stack_size"], $nutrition, $can_always_eat === 1, $saturation, $residue));
 			}else{
-				ItemFactory::registerItem(new CustomItem($id, $meta, $name, $data["max_stack_size"], $mining_speed));
+				$itemFactory->register(new CustomItem(new ItemIdentifier($id, $meta), $name, $data["max_stack_size"], $mining_speed));
 			}
 		}catch(Throwable $e){
 			throw new AssumptionFailedError("Cannot register item $name($id:$meta): item is already registered or item id is out of range");
@@ -204,13 +219,14 @@ class CustomItemLoader extends PluginBase implements Listener{
 
 	public function onPlayerJoin(PlayerJoinEvent $event) : void{
 		$player = $event->getPlayer();
-		$player->sendDataPacket(clone $this->packet);
+		$player->getNetworkSession()->sendDataPacket(clone $this->packet);
 	}
 
 	public function onDataPacketSend(DataPacketSendEvent $event) : void{
-		$packet = $event->getPacket();
-		if($packet instanceof StartGamePacket){
-			$packet->experiments = new Experiments([], true);
+		foreach($event->getPackets() as $packet){
+			if($packet instanceof StartGamePacket){
+				$packet->experiments = new Experiments([], true);
+			}
 		}
 	}
 
